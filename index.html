@@ -79,7 +79,7 @@
   select{background:var(--field);color:var(--ink);border:1px solid var(--ring);border-radius:10px;padding:6px 8px}
 </style>
 <style>
-  /* ADDITION: סגנון מינימלי לסרגל המשוואות */
+  /* Equation Toolbar Styling */
   .eqtb-wrap{ margin:8px 0 }
   .eqtb{
     display:flex; flex-wrap:wrap; gap:.4rem; align-items:center;
@@ -188,48 +188,25 @@ y = C_1*sin(x) + C_2*cos(x)"></textarea>
   </div>
 
 <script>
-/* =========================
-   מבנה נתונים של תרגילים
-   ========================= */
-const problems = [
+'use strict';
+
+/* ============================================================================
+   EXERCISE CONFIGURATION
+   ============================================================================ */
+const EXERCISE_CONFIG = [
   {
     id: 'ode_second_order_variation_params_01',
     title: 'מסדר שני — וריאציית פרמטרים',
     
-    /* ============================================================================
-       TAB_EXERCISE_DATA_START - Exercise Tab Content
-       ============================================================================ */
+    // Exercise content placeholders
     latexProblem: String.raw``,
     exampleInput: String.raw``,
-    /* ============================================================================
-       TAB_EXERCISE_DATA_END
-       ============================================================================ */
-    
-    /* ============================================================================
-       TAB_HINT1_DATA_START - Hint 1 Tab Content
-       ============================================================================ */
     hint1Html: ``,
-    /* ============================================================================
-       TAB_HINT1_DATA_END
-       ============================================================================ */
-    
-    /* ============================================================================
-       TAB_HINT2_DATA_START - Hint 2 Tab Content
-       ============================================================================ */
     hint2Html: ``,
-    /* ============================================================================
-       TAB_HINT2_DATA_END
-       ============================================================================ */
-    
-    /* ============================================================================
-       TAB_SOLUTION_DATA_START - Solution Tab Content
-       ============================================================================ */
     solutionDisplayLatex: String.raw``,
     solutionStepsHtml: ``,
-    /* ============================================================================
-       TAB_SOLUTION_DATA_END
-       ============================================================================ */
     
+    // Checking configuration
     check: {
       type: 'variation_parameters_form',
       homogeneousTerms: ['cos(x)', 'sin(x)'],
@@ -239,300 +216,545 @@ const problems = [
   }
 ];
 
-/* =========================
-   Tabs
-   ========================= */
-(function(){
-  const buttons = [...document.querySelectorAll('.tab-btn')];
-  const panels  = [...document.querySelectorAll('.tab-panel')];
-  function activate(id){
-    buttons.forEach(b=>b.setAttribute('aria-selected', String(b.getAttribute('aria-controls')===id)));
-    panels.forEach(p=>p.classList.toggle('active', p.id===id));
-    if (window.MathJax?.typesetPromise) MathJax.typesetPromise(panels.filter(p=>p.id===id));
-  }
-  buttons.forEach(btn=>btn.addEventListener('click', ()=>activate(btn.getAttribute('aria-controls'))));
-})();
-
-/* =========================
-   Render helpers
-   ========================= */
-function waitForLibraries(cb){
-  let tries=0;(function check(){
-    if (typeof math!=='undefined' && window.MathJax) cb();
-    else if(tries++<100) setTimeout(check,50);
-    else console.error('Libraries failed to load');
-  })();
-}
-async function renderLatexTo(containerId, latex, display=true){
-  const el = document.getElementById(containerId);
-  el.innerHTML = display ? `\\[ ${latex} \\]` : `\\(${latex}\\)`;
-  if (window.MathJax?.typesetPromise){
-    try{ await MathJax.typesetPromise([el]) }catch{ el.innerHTML = `<div class="monospace">${latex}</div>` }
-  }
-}
-function setHtml(id, html){
-  const el = document.getElementById(id);
-  el.innerHTML = html;
-  if (window.MathJax?.typesetPromise){ MathJax.typesetPromise([el]); }
-}
-
 /* ============================================================================
-   SIMPLIFIED INPUT PROCESSING
+   CORE MATHEMATICAL PROCESSING ENGINE
    ============================================================================ */
-function sanitizeBasic(s){ 
-  return (s||'').replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g,'').trim() 
-}
-function looksLikeLatex(s){ 
-  return /\\[a-zA-Z]+|\\\[|\\\]|\\\(|\\\)|\$(?!\s*$)|\\int|\\sum|\\frac|\\sqrt|\\sin|\\cos|\\exp|\\cdot/.test(s) 
-}
-
-/* ---- LaTeX → Plain (ללא ^→**) ---- */
-function latexToPlain(s) {
-  try {
-    let expr = (s || "").trim();
-    if (!expr) return "";
-    expr = expr.replace(/\\sin/g, "sin")
-               .replace(/\\cos/g, "cos")
-               .replace(/\\tan/g, "tan")
-               .replace(/\\exp/g, "exp")
-               .replace(/\\ln/g, "log")
-               .replace(/\\log/g, "log")
-               .replace(/\\sqrt\s*\{([^{}]+)\}/g, "sqrt($1)")
-               .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)")
-               .replace(/\\left|\\right/g, "")
-               .replace(/\\cdot|\\times/g, "*")
-               .replace(/\\pi/g, "pi")
-               .replace(/\{/g, "(")
-               .replace(/\}/g, ")")
-               .replace(/\s+/g, "");
-    expr = expr.replace(/C_(\d+)/g, "C_$1");
-    // לא ממירים ^ כאן
-    expr = expr.replace(/^[yY]\s*=\s*/, "");
-    return expr;
-  } catch (e) {
-    return s;
-  }
-}
-
-/* ---- מיזוג חזקה עבור x ---- */
-function mergeXPowers(str){
-  if (typeof str !== 'string') return str;
-  // x * x^n  →  x^(n+1)
-  str = str.replace(/\b([xX])\s*\*\s*\1\s*\^\s*(?:\{(\d+)\}|(\d+))/g,
-    (_m, v, nb, n) => `${v}^${Number(nb ?? n) + 1}`);
-  // x^n * x  →  x^(n+1)
-  str = str.replace(/\b([xX])\s*\^\s*(?:\{(\d+)\}|(\d+))\s*\*\s*\1\b/g,
-    (_m, v, nb, n) => `${v}^${Number(nb ?? n) + 1}`);
-  // x * x  →  x^2
-  str = str.replace(/\b([xX])\s*\*\s*\1\b/g, (_m, v) => `${v}^2`);
-  return str;
-}
-
-/* ---- קומפילציה לפונקציית JS (לצרכי חישוב) ---- */
-function compileMathExpression(expr) {
-  try {
-    const jsExpr = expr.replace(/\^/g, '**')        // כאן כן ממירים ל-** עבור JS
-                       .replace(/(\d)([a-zA-Z])/g, '$1*$2')
-                       .replace(/([a-zA-Z])(\d)/g, '$1*$2');
-    const mathFunc = new Function('x', 'y', 'sin', 'cos', 'tan', 'exp', 'log', 'sqrt', 'pi', 'e', 'C_1', 'C_2', 'C_3', 'C_4',
-      `"use strict"; try { const result = (${jsExpr}); return Number.isFinite(result) ? result : NaN; } catch(e) { return NaN; }`
-    );
-    mathFunc(0, 0, Math.sin, Math.cos, Math.tan, Math.exp, Math.log, Math.sqrt, Math.PI, Math.E, 1, 1, 1, 1);
-    return mathFunc;
-  } catch (e) {
-    throw new Error(`Cannot parse expression: ${e.message}`);
-  }
-}
-
-/* ---- Plain → LaTeX ע"י mathjs ---- */
-function expressionToLatex(expr, mathFunc) {
-  try {
-    const node = math.parse(expr);   // mathjs מצפה ל-^
-    let latex = node.toTex({ parenthesis: 'keep', implicit: 'show' });
-    latex = latex.replace(/C\\_(\d+)/g, 'C_{$1}');
-    return latex;
-  } catch (e) {
-    return expr;
-  }
-}
-
-/* ============================================================================
-   EXERCISE-SPECIFIC CHECKING (כמו שהיה)
-   ============================================================================ */
-const currentCheck = { type: null, homogeneousTerms: [], particularTerm: '', particularCoeff: 1 };
-
-function checkVariationParametersSolution(userRaw) {
-    if (!userRaw || !userRaw.trim()) return false;
-    try {
-        const plainExpr = latexToPlain(userRaw).toLowerCase().replace(/\s+/g, '');
-        const hasC1CosPattern = /c[_]?1.*cos\(x\)|cos\(x\).*c[_]?1/i.test(plainExpr);
-        const hasC2SinPattern = /c[_]?2.*sin\(x\)|sin\(x\).*c[_]?2/i.test(plainExpr);
-        const hasExpPattern = /0\.5.*exp\(x\)|exp\(x\).*0\.5|\(1\/2\).*exp\(x\)|exp\(x\).*\(1\/2\)/i.test(plainExpr);
-        const hasNegativeExp = /-.*0\.5.*exp\(x\)|-.*exp\(x\).*0\.5/i.test(plainExpr);
-        if (hasNegativeExp) return false;
-        return hasC1CosPattern && hasC2SinPattern && hasExpPattern;
-    } catch {
-        return false;
-    }
-}
-
-/* =========================
-   UI wiring + loadProblem
-   ========================= */
-waitForLibraries(function(){
-  /* 🔒 מניע אתחול כפול במקרה שהסקריפט נטען/רץ פעמיים */
-  if (window.__OU_APP_WIRED__) return;
-  window.__OU_APP_WIRED__ = true;
-
-  const inputEl = document.getElementById('inputRaw');
-  const forceLatexEl = document.getElementById('forceLatex');
-  const btnClear = document.getElementById('btnClear');
-  const btnCheck = document.getElementById('btnCheck');
-
-  function setStatus(msg, cls){
-    const el = document.getElementById('status');
-    el.className = `status ${cls||''}`;
-    el.textContent = (msg||'') + (cls==='ok' ? '  @ open university' : '');
-  }
-
-  let debTimer=null; function debounce(fn,ms=180){ clearTimeout(debTimer); debTimer=setTimeout(fn,ms) }
-  async function process(){
-    const raw0 = inputEl.value, raw = sanitizeBasic(raw0);
-    if(!raw){ 
-      document.getElementById('render').innerHTML=''; 
-      setStatus('',''); 
-      return;
-    }
-    const forced = forceLatexEl.checked, latexMode = forced || looksLikeLatex(raw);
-    try{
-      if(latexMode){
-        await renderLatexTo('render', raw, true);
-        setStatus('מעובד במצב LaTeX', 'ok');
-      } else {
-        // Plain mode
-        const plainExpr0 = latexToPlain(raw);
-        const plainExpr  = mergeXPowers(plainExpr0);   // ← מיזוג חזקה
-        const mathFunc   = compileMathExpression(plainExpr);
-        const latex      = expressionToLatex(plainExpr, mathFunc);
-        await renderLatexTo('render', latex, true);
-        setStatus(`מעובד: ${plainExpr}`, 'ok');
-      }
-    }catch(err){
-      document.getElementById('render').innerHTML =
-        `<div class="monospace">שגיאה בעיבוד: ${err.message}\n\nקלט מקורי: ${raw}</div>`;
-      setStatus('שגיאה בעיבוד — בדוק תחביר', 'bad');
-    }
-  }
-
-  inputEl.addEventListener('input', ()=>debounce(process,120));
-  forceLatexEl.addEventListener('change', process);
-  document.getElementById('btnClear').addEventListener('click', ()=>{
-    inputEl.value=''; document.getElementById('render').innerHTML=''; setStatus('','');
-    document.getElementById('checkMsg').textContent=''; inputEl.focus();
-  });
-  document.getElementById('btnCheck').addEventListener('click', ()=>{
-    const raw0 = inputEl.value, raw = sanitizeBasic(raw0);
-    const latexMode = forceLatexEl.checked || looksLikeLatex(raw);
-    const el = document.getElementById('checkMsg');
-    if(latexMode && forceLatexEl.checked) {
-      el.className='status bad'; 
-      el.textContent='בדיקת נכונות לא פועלת במצב LaTeX מוכרח - בטלו הסימון לבדיקה';
-    } else {
-      const ok = checkVariationParametersSolution(raw0);
-      el.className='status ' + (ok?'ok':'bad'); 
-      el.textContent = ok ? 'תשובה נכונה' : 'תשובה לא נכונה';
-    }
-  });
-
-  async function loadProblem(index=0){
-    const p = problems[index];
-    currentCheck.type = p.check.type;
-    currentCheck.homogeneousTerms = p.check.homogeneousTerms;
-    currentCheck.particularTerm = p.check.particularTerm;
-    currentCheck.particularCoeff = p.check.particularCoeff;
-
-    await renderLatexTo('problemRender', p.latexProblem, true);
-    await renderLatexTo('solutionBox', p.solutionDisplayLatex, true);
-    setHtml('solutionSteps', p.solutionStepsHtml);
-    setHtml('hint1Box', p.hint1Html);
-    setHtml('hint2Box', p.hint2Html);
-
-    const inputEl2 = document.getElementById('inputRaw');
-    inputEl2.value = p.exampleInput || '';
-    (typeof process === 'function') && process();
-  }
-
-  loadProblem(0);
-});
-</script>
-
-<script>
-/* ADDITION: מודול עורך משוואות — הזרקת טקסט בלבד לשדה #inputRaw */
-(function(){
-  function insertAtCaret(el, before, after){
-    el.focus();
-    const s = el.selectionStart ?? el.value.length;
-    const e = el.selectionEnd   ?? el.value.length;
-    const sel = el.value.slice(s, e);
-    const text = before + (sel || '') + (after || '');
-    el.value = el.value.slice(0, s) + text + el.value.slice(e);
-    const pos = sel ? s + before.length + sel.length : s + before.length;
-    el.setSelectionRange(pos, pos);
-    el.dispatchEvent(new Event('input',  { bubbles:true }));
-    el.dispatchEvent(new Event('change', { bubbles:true }));
-  }
-
-  function btn(label, title, onClick){
-    const b = document.createElement('button');
-    b.type = 'button'; b.textContent = label; if(title) b.title = title;
-    b.addEventListener('click', onClick);
-    return b;
-  }
-
-  // אתחול הסרגל פעם אחת בלבד למיקום הנתון
-  window.initEquationToolbar = function(opts){
-    const input = document.querySelector(opts.target);
-    const mount = document.querySelector(opts.mount);
-    if(!input || !mount) return;
-
-    //  אם כבר אותחל — אל תוסיף שוב
-    if (mount.dataset.eqtbInited === '1' || mount.querySelector('.eqtb')) {
-      return;
-    }
-    mount.dataset.eqtbInited = '1';
-
-    const bar = document.createElement('div');
-    bar.className = 'eqtb';
-
-const items = [
-  {label:'C_1', title:'קבוע C_1',     click:()=>insertAtCaret(input,'C_1','')},
-  {label:'C_2', title:'קבוע C_2',     click:()=>insertAtCaret(input,'C_2','')},
-
-  {label:'sin', title:'\\sin( )',     click:()=>insertAtCaret(input,'\\sin(',')')},
-  {label:'cos', title:'\\cos( )',     click:()=>insertAtCaret(input,'\\cos(',')')},
-
-  {label:'frac',title:'\\frac{ }{ }', click:()=>insertAtCaret(input,'\\frac{','}{}')},
-  {label:'√',   title:'\\sqrt{ }',    click:()=>insertAtCaret(input,'\\sqrt{','}')},
-
-  {label:'e^x', title:'e^{x}',        click:()=>insertAtCaret(input,'e^','x')},
-  {label:'x^2', title:'x^{2}',        click:()=>insertAtCaret(input,'x^','2')},
-
-  {label:'∫',   title:'\\int',        click:()=>insertAtCaret(input,'\\int ','')},
+class MathExpressionProcessor {
   
-  {label:'( )', title:'סוגריים עגולים',   click:()=>insertAtCaret(input,'(',')')},
-  {label:'{ }', title:'סוגריים מסולסלים', click:()=>insertAtCaret(input,'{','}')},
+  /**
+   * Convert LaTeX syntax to plain mathematical notation
+   * Preserves ^ notation for mathjs compatibility
+   */
+  static latexToPlain(input) {
+    if (!input || typeof input !== 'string') return '';
+    
+    let expr = input.trim();
+    
+    // Remove equation prefix
+    expr = expr.replace(/^[yY]\s*=\s*/, '');
+    
+    // LaTeX function conversions
+    const latexReplacements = [
+      [/\\sin/g, 'sin'],
+      [/\\cos/g, 'cos'],
+      [/\\tan/g, 'tan'],
+      [/\\exp/g, 'exp'],
+      [/\\ln/g, 'log'],
+      [/\\log/g, 'log'],
+      [/\\sqrt\s*\{([^{}]+)\}/g, 'sqrt($1)'],
+      [/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1)/($2)'],
+      [/\\left|\\right/g, ''],
+      [/\\cdot|\\times/g, '*'],
+      [/\\pi/g, 'pi'],
+      [/\{/g, '('],
+      [/\}/g, ')']
+    ];
+    
+    latexReplacements.forEach(([pattern, replacement]) => {
+      expr = expr.replace(pattern, replacement);
+    });
+    
+    // Clean up spacing and subscripts
+    expr = expr.replace(/\s+/g, '')
+               .replace(/C_(\d+)/g, 'C_$1');
+    
+    return expr;
+  }
+  
+  /**
+   * Merge power expressions for variables (e.g., x*x -> x^2)
+   * Works with ^ notation before conversion to **
+   */
+  static mergePowerExpressions(expr) {
+    if (!expr || typeof expr !== 'string') return expr;
+    
+    // x * x^n  →  x^(n+1)
+    expr = expr.replace(
+      /\b([xX])\s*\*\s*\1\s*\^\s*(?:\{(\d+)\}|(\d+))/g,
+      (match, variable, bracedExp, bareExp) => {
+        const exponent = parseInt(bracedExp || bareExp);
+        return `${variable}^${exponent + 1}`;
+      }
+    );
+    
+    // x^n * x  →  x^(n+1)
+    expr = expr.replace(
+      /\b([xX])\s*\^\s*(?:\{(\d+)\}|(\d+))\s*\*\s*\1\b/g,
+      (match, variable, bracedExp, bareExp) => {
+        const exponent = parseInt(bracedExp || bareExp);
+        return `${variable}^${exponent + 1}`;
+      }
+    );
+    
+    // x * x  →  x^2
+    expr = expr.replace(/\b([xX])\s*\*\s*\1\b/g, '$1^2');
+    
+    return expr;
+  }
+  
+  /**
+   * Compile mathematical expression to JavaScript function
+   * Converts ^ to ** for JavaScript compatibility
+   */
+  static compileToFunction(expr) {
+    try {
+      // Convert to JavaScript operators
+      const jsExpr = expr
+        .replace(/\^/g, '**')
+        .replace(/(\d)([a-zA-Z])/g, '$1*$2') // implicit multiplication: 2x -> 2*x
+        .replace(/([a-zA-Z])(\d)/g, '$1*$2'); // implicit multiplication: x2 -> x*2
+      
+      // Create safe function with mathematical constants
+      const mathFunction = new Function(
+        'x', 'y', 'sin', 'cos', 'tan', 'exp', 'log', 'sqrt', 'pi', 'e', 
+        'C_1', 'C_2', 'C_3', 'C_4',
+        `"use strict"; 
+         try { 
+           const result = (${jsExpr}); 
+           return Number.isFinite(result) ? result : NaN; 
+         } catch(error) { 
+           return NaN; 
+         }`
+      );
+      
+      // Test function with sample values
+      mathFunction(0, 0, Math.sin, Math.cos, Math.tan, Math.exp, Math.log, Math.sqrt, Math.PI, Math.E, 1, 1, 1, 1);
+      
+      return mathFunction;
+    } catch (error) {
+      throw new Error(`Cannot compile expression: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Convert mathematical expression to LaTeX using mathjs
+   */
+  static toLatex(expr) {
+    try {
+      const node = math.parse(expr);
+      let latex = node.toTex({ parenthesis: 'keep', implicit: 'show' });
+      
+      // Fix subscript formatting
+      latex = latex.replace(/C\\_(\d+)/g, 'C_{$1}');
+      
+      return latex;
+    } catch (error) {
+      // Fallback to original expression if conversion fails
+      return expr;
+    }
+  }
+  
+  /**
+   * Process user input from raw text to displayable LaTeX
+   */
+  static process(rawInput) {
+    const plainExpr = this.latexToPlain(rawInput);
+    const mergedExpr = this.mergePowerExpressions(plainExpr);
+    const mathFunction = this.compileToFunction(mergedExpr);
+    const latexOutput = this.toLatex(mergedExpr);
+    
+    return {
+      plain: mergedExpr,
+      latex: latexOutput,
+      function: mathFunction
+    };
+  }
+}
 
-];
+/* ============================================================================
+   ANSWER VALIDATION ENGINE
+   ============================================================================ */
+class AnswerValidator {
+  
+  /**
+   * Validate variation of parameters solution format
+   */
+  static validateVariationParameters(userInput) {
+    if (!userInput || !userInput.trim()) return false;
+    
+    try {
+      const plainExpr = MathExpressionProcessor.latexToPlain(userInput)
+        .toLowerCase()
+        .replace(/\s+/g, '');
+      
+      // Check for required components
+      const patterns = {
+        hasC1Cos: /c[_]?1.*cos\(x\)|cos\(x\).*c[_]?1/i,
+        hasC2Sin: /c[_]?2.*sin\(x\)|sin\(x\).*c[_]?2/i,
+        hasHalfExp: /(0\.5|0,5|\(1\/2\)|\(0\.5\)).*exp\(x\)|exp\(x\).*(0\.5|0,5|\(1\/2\)|\(0\.5\))/i,
+        hasNegativeExp: /-.*exp\(x\)/i
+      };
+      
+      const results = {};
+      for (const [key, pattern] of Object.entries(patterns)) {
+        results[key] = pattern.test(plainExpr);
+      }
+      
+      // Reject if negative exponential coefficient
+      if (results.hasNegativeExp) {
+        console.log('Validation failed: negative exponential coefficient');
+        return false;
+      }
+      
+      // Require all positive components
+      const isValid = results.hasC1Cos && results.hasC2Sin && results.hasHalfExp;
+      
+      console.log('Validation results:', { plainExpr, ...results, isValid });
+      return isValid;
+      
+    } catch (error) {
+      console.error('Validation error:', error);
+      return false;
+    }
+  }
+}
 
-    items.forEach(it => bar.appendChild(btn(it.label, it.title, it.click)));
-    mount.appendChild(bar);
-  };
-})();
-</script>
+/* ============================================================================
+   UI MANAGEMENT
+   ============================================================================ */
+class ExerciseUI {
+  constructor() {
+    this.elements = this.getElements();
+    this.currentExercise = null;
+    this.debounceTimer = null;
+    
+    this.initializeEventListeners();
+    this.initializeEquationToolbar();
+  }
+  
+  getElements() {
+    const elements = {};
+    const ids = [
+      'inputRaw', 'forceLatex', 'btnClear', 'btnCheck', 
+      'status', 'render', 'checkMsg', 'problemRender', 
+      'solutionBox', 'solutionSteps', 'hint1Box', 'hint2Box'
+    ];
+    
+    ids.forEach(id => {
+      elements[id] = document.getElementById(id);
+      if (!elements[id]) {
+        console.warn(`Element with id '${id}' not found`);
+      }
+    });
+    
+    return elements;
+  }
+  
+  initializeEventListeners() {
+    // Input processing with debouncing
+    this.elements.inputRaw?.addEventListener('input', () => {
+      this.debounce(() => this.processInput(), 120);
+    });
+    
+    this.elements.forceLatex?.addEventListener('change', () => {
+      this.processInput();
+    });
+    
+    // Control buttons
+    this.elements.btnClear?.addEventListener('click', () => {
+      this.clearInput();
+    });
+    
+    this.elements.btnCheck?.addEventListener('click', () => {
+      this.checkAnswer();
+    });
+  }
+  
+  debounce(func, delay) {
+    clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(func, delay);
+  }
+  
+  setStatus(message, type = '') {
+    if (!this.elements.status) return;
+    
+    this.elements.status.className = `status ${type}`;
+    this.elements.status.textContent = message + (type === 'ok' ? '  @ open university' : '');
+  }
+  
+  async processInput() {
+    const rawInput = this.elements.inputRaw?.value || '';
+    const sanitizedInput = rawInput.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
+    
+    if (!sanitizedInput) {
+      this.elements.render.innerHTML = '';
+      this.setStatus('');
+      return;
+    }
+    
+    const isLatexMode = this.elements.forceLatex?.checked || this.looksLikeLatex(sanitizedInput);
+    
+    try {
+      if (isLatexMode) {
+        await this.renderLatex(sanitizedInput);
+        this.setStatus('מעובד במצב LaTeX', 'ok');
+      } else {
+        const result = MathExpressionProcessor.process(sanitizedInput);
+        await this.renderLatex(result.latex);
+        this.setStatus(`מעובד: ${result.plain}`, 'ok');
+      }
+    } catch (error) {
+      console.error('Processing error:', error);
+      this.elements.render.innerHTML = 
+        `<div class="monospace">שגיאה בעיבוד: ${error.message}\n\nקלט מקורי: ${sanitizedInput}</div>`;
+      this.setStatus('שגיאה בעיבוד — בדוק תחביר', 'bad');
+    }
+  }
+  
+  looksLikeLatex(input) {
+    return /\\[a-zA-Z]+|\\\[|\\\]|\\\(|\\\)|\$(?!\s*$)|\\int|\\sum|\\frac|\\sqrt|\\sin|\\cos|\\exp|\\cdot/.test(input);
+  }
+  
+  async renderLatex(latexContent) {
+    if (!this.elements.render) return;
+    
+    this.elements.render.innerHTML = `\\[ ${latexContent} \\]`;
+    
+    if (window.MathJax?.typesetPromise) {
+      try {
+        await MathJax.typesetPromise([this.elements.render]);
+      } catch (error) {
+        this.elements.render.innerHTML = `<div class="monospace">${latexContent}</div>`;
+      }
+    }
+  }
+  
+  clearInput() {
+    if (this.elements.inputRaw) {
+      this.elements.inputRaw.value = '';
+      this.elements.inputRaw.focus();
+    }
+    if (this.elements.render) {
+      this.elements.render.innerHTML = '';
+    }
+    if (this.elements.checkMsg) {
+      this.elements.checkMsg.textContent = '';
+    }
+    this.setStatus('');
+  }
+  
+  checkAnswer() {
+    const rawInput = this.elements.inputRaw?.value || '';
+    const isLatexForced = this.elements.forceLatex?.checked;
+    
+    if (!this.elements.checkMsg) return;
+    
+    if (isLatexForced) {
+      this.elements.checkMsg.className = 'status bad';
+      this.elements.checkMsg.textContent = 'בדיקת נכונות לא פועלת במצב LaTeX מוכרח - בטלו הסימון לבדיקה';
+    } else {
+      try {
+        const isCorrect = AnswerValidator.validateVariationParameters(rawInput);
+        this.elements.checkMsg.className = `status ${isCorrect ? 'ok' : 'bad'}`;
+        this.elements.checkMsg.textContent = isCorrect ? 'תשובה נכונה' : 'תשובה לא נכונה';
+      } catch (error) {
+        console.error('Check error:', error);
+        this.elements.checkMsg.className = 'status bad';
+        this.elements.checkMsg.textContent = 'שגיאה בבדיקת התשובה';
+      }
+    }
+  }
+  
+  async loadExercise(exerciseIndex = 0) {
+    const exercise = EXERCISE_CONFIG[exerciseIndex];
+    if (!exercise) {
+      console.error(`Exercise at index ${exerciseIndex} not found`);
+      return;
+    }
+    
+    this.currentExercise = exercise;
+    
+    // Load content into UI elements
+    const contentMappings = [
+      ['problemRender', exercise.latexProblem],
+      ['solutionBox', exercise.solutionDisplayLatex],
+      ['solutionSteps', exercise.solutionStepsHtml],
+      ['hint1Box', exercise.hint1Html],
+      ['hint2Box', exercise.hint2Html]
+    ];
+    
+    for (const [elementId, content] of contentMappings) {
+      if (this.elements[elementId]) {
+        if (elementId.includes('Render') || elementId === 'solutionBox') {
+          await this.renderLatexToElement(elementId, content);
+        } else {
+          this.setElementHtml(elementId, content);
+        }
+      }
+    }
+    
+    // Set example input
+    if (this.elements.inputRaw) {
+      this.elements.inputRaw.value = exercise.exampleInput || '';
+      this.processInput();
+    }
+  }
+  
+  async renderLatexToElement(elementId, latexContent) {
+    const element = this.elements[elementId];
+    if (!element) return;
+    
+    element.innerHTML = `\\[ ${latexContent} \\]`;
+    
+    if (window.MathJax?.typesetPromise) {
+      try {
+        await MathJax.typesetPromise([element]);
+      } catch (error) {
+        element.innerHTML = `<div class="monospace">${latexContent}</div>`;
+      }
+    }
+  }
+  
+  setElementHtml(elementId, htmlContent) {
+    const element = this.elements[elementId];
+    if (!element) return;
+    
+    element.innerHTML = htmlContent;
+    
+    if (window.MathJax?.typesetPromise) {
+      MathJax.typesetPromise([element]);
+    }
+  }
+  
+  initializeEquationToolbar() {
+    const input = this.elements.inputRaw;
+    const mount = document.getElementById('eqToolbar');
+    
+    if (!input || !mount || mount.dataset.initialized) return;
+    
+    mount.dataset.initialized = 'true';
+    
+    const toolbar = document.createElement('div');
+    toolbar.className = 'eqtb';
+    
+    const toolbarItems = [
+      { label: 'C_1', title: 'קבוע C_1', insert: ['C_1', ''] },
+      { label: 'C_2', title: 'קבוע C_2', insert: ['C_2', ''] },
+      { label: 'sin', title: '\\sin( )', insert: ['\\sin(', ')'] },
+      { label: 'cos', title: '\\cos( )', insert: ['\\cos(', ')'] },
+      { label: 'frac', title: '\\frac{ }{ }', insert: ['\\frac{', '}{}'] },
+      { label: '√', title: '\\sqrt{ }', insert: ['\\sqrt{', '}'] },
+      { label: 'e^x', title: 'e^{x}', insert: ['e^', 'x'] },
+      { label: 'x^2', title: 'x^{2}', insert: ['x^', '2'] },
+      { label: '∫', title: '\\int', insert: ['\\int ', ''] },
+      { label: '( )', title: 'סוגריים עגולים', insert: ['(', ')'] },
+      { label: '{ }', title: 'סוגריים מסולסלים', insert: ['{', '}'] }
+    ];
+    
+    toolbarItems.forEach(item => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = item.label;
+      button.title = item.title;
+      button.addEventListener('click', () => {
+        this.insertAtCaret(input, item.insert[0], item.insert[1]);
+      });
+      toolbar.appendChild(button);
+    });
+    
+    mount.appendChild(toolbar);
+  }
+  
+  insertAtCaret(element, before, after) {
+    element.focus();
+    
+    const start = element.selectionStart ?? element.value.length;
+    const end = element.selectionEnd ?? element.value.length;
+    const selectedText = element.value.slice(start, end);
+    const insertText = before + (selectedText || '') + (after || '');
+    
+    element.value = element.value.slice(0, start) + insertText + element.value.slice(end);
+    
+    const newPosition = selectedText ? start + before.length + selectedText.length : start + before.length;
+    element.setSelectionRange(newPosition, newPosition);
+    
+    // Trigger input event to update display
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
 
-<!-- אתחול: מפעיל את העורך על #inputRaw ומתקין אותו ב-#eqToolbar -->
-<script>
-  initEquationToolbar({ target:'#inputRaw', mount:'#eqToolbar' });
+/* ============================================================================
+   TAB SYSTEM
+   ============================================================================ */
+class TabSystem {
+  static initialize() {
+    const tabButtons = [...document.querySelectorAll('.tab-btn')];
+    const tabPanels = [...document.querySelectorAll('.tab-panel')];
+    
+    function activateTab(targetId) {
+      // Update button states
+      tabButtons.forEach(button => {
+        const isActive = button.getAttribute('aria-controls') === targetId;
+        button.setAttribute('aria-selected', isActive.toString());
+      });
+      
+      // Update panel visibility
+      tabPanels.forEach(panel => {
+        panel.classList.toggle('active', panel.id === targetId);
+      });
+      
+      // Re-render MathJax for activated panels
+      if (window.MathJax?.typesetPromise) {
+        const activePanels = tabPanels.filter(panel => panel.id === targetId);
+        MathJax.typesetPromise(activePanels);
+      }
+    }
+    
+    // Attach click handlers
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const targetId = button.getAttribute('aria-controls');
+        if (targetId) activateTab(targetId);
+      });
+    });
+  }
+}
+
+/* ============================================================================
+   APPLICATION INITIALIZATION
+   ============================================================================ */
+function initializeApplication() {
+  // Prevent multiple initializations
+  if (window.__EXERCISE_APP_INITIALIZED__) return;
+  window.__EXERCISE_APP_INITIALIZED__ = true;
+  
+  // Wait for required libraries
+  function waitForLibraries(callback) {
+    let attempts = 0;
+    const maxAttempts = 100;
+    
+    function checkLibraries() {
+      if (typeof math !== 'undefined' && window.MathJax) {
+        callback();
+      } else if (attempts++ < maxAttempts) {
+        setTimeout(checkLibraries, 50);
+      } else {
+        console.error('Required libraries failed to load');
+      }
+    }
+    
+    checkLibraries();
+  }
+  
+  waitForLibraries(() => {
+    // Initialize components
+    TabSystem.initialize();
+    const ui = new ExerciseUI();
+    
+    // Load first exercise
+    ui.loadExercise(0);
+    
+    console.log('Exercise application initialized successfully');
+  });
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApplication);
+} else {
+  initializeApplication();
+}
 </script>
 
 <footer>© האוניברסיטה הפתוחה </footer>
