@@ -763,6 +763,17 @@ if (document.readyState === 'loading') {
 }
 </script>
 
-<footer>© האוניברסיטה הפתוחה </footer>
+<!-- Footer (replace the existing one) -->
+<style>
+  footer.site-footer{
+    font-size:.85rem;        /* קטן יותר */
+    color:var(--muted);      /* צבע עדין לפי ערכת הצבעים הקיימת */
+    text-align:center;
+    padding:8px 0 14px;      /* רווח אנכי נוח */
+  }
+</style>
+<footer class="site-footer" dir="rtl" aria-label="כותרת תחתונה">
+  @ האוניברסיטה הפתוחה
+</footer>
 </body>
 </html>
