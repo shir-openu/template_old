@@ -246,7 +246,7 @@ class MathExpressionProcessor {
       [/\\left|\\right/g, ''],
       [/\\cdot|\\times/g, '*'],
       [/\\pi/g, 'pi'],
-      [/\{/g, '('],
+      [/\{/g, '*('],
       [/\}/g, ')']
     ];
     
@@ -257,6 +257,12 @@ class MathExpressionProcessor {
     // Clean up spacing and subscripts
     expr = expr.replace(/\s+/g, '')
                .replace(/C_(\d+)/g, 'C_$1');
+    
+    // Add implicit multiplication for common patterns
+    expr = expr.replace(/(\d+)\(/g, '$1*(');  // 2(x) -> 2*(x)
+    expr = expr.replace(/(\d+)([a-zA-Z])/g, '$1*$2');  // 2x -> 2*x
+    expr = expr.replace(/\)([a-zA-Z])/g, ')*$1');  // )x -> )*x
+    expr = expr.replace(/\)(\d)/g, ')*$1');  // )2 -> )*2
     
     return expr;
   }
